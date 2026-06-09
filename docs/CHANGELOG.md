@@ -2,6 +2,21 @@
 
 所有值得记录的变更都会写在这里。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [v3.2.0] - 2026-06-09
+
+> **「精简为 Claude Code 原生宿主版：移除内置 LLM/RAG 编排层。」**
+
+### 核心变更
+
+- **定位明确**：项目改为面向 Claude Code / Cursor 等宿主，意图识别与角色化回答由宿主 LLM 直接承载（读取 `SKILL.md` + `knowledge/`），项目不再内置 LLM/RAG 服务
+- **移除意图编排层**：删除 `modules/intent_chat.py`、`modules/intent_router.py`、`modules/knowledge_retriever.py`、`modules/llm_providers.py`、`rules/intent_rules.yaml`、`tests/test_intent_router.py`、`docs/intent-router-design.md`
+- **依赖瘦身**：`yt-dlp`、`faster-whisper`（仅 corpus 语料采集用）从核心依赖移至可选 extra `corpus`；移除运行时对 `httpx`、`pyyaml` 的间接依赖
+- **配置精简**：`.env.example` 移除 `LLM_API_KEY`、`KB_ENABLED`、`KB_API_URL` 等配置项，只保留 Tushare + 数据库配置
+- **保留 Z 哥框架本体**：`SKILL.md`、`knowledge/`、`rules/career_prompt.md`、`rules/life_prompt.md` 完整保留，供宿主直接加载
+- **文档同步**：README / AGENTS / GEMINI / USER_GUIDE / CONFIG_GUIDE 全面对齐新定位
+
+---
+
 ## [v3.0.0] - 2026-06-03
 
 > **「v3.0.0 正式版：编排模式 + 人生/创业蒸馏 + 双维度扩展。」**

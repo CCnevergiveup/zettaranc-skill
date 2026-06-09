@@ -38,7 +38,6 @@
 
 | 能力 | 说明 | 示例 |
 |------|------|------|
-| **🎯 意图识别** | 自动识别 stock/career/life/chat 四种意图，路由到对应角色框架 | `python -m modules.intent_chat "B1 买点怎么判断"` |
 | **📊 股票分析** | 60+ 技术指标实时计算，战法自动识别，支持 `--json` 输出 | `zt analyze 600487.SH --json` |
 | **📈 策略回测** | 少妇战法六步闭环 / 多策略融合 / 组合回测 | `zt backtest shaofu 600487.SH` |
 | **🔍 智能选股** | 曼城评分 + 蜈蚣图过滤 + 沙漏评分 + 牛绳判断 | `zt screen --strategy B1 --limit 20` |
@@ -53,13 +52,12 @@
 - 🌐 **多线程网络 I/O**：全市场 5000+ 股票数据并发拉取（`ThreadPoolExecutor`），带线程安全的 Tushare API 防封限流锁。
 - 🧩 **模块深度解耦**：超大策略文件（1600行+）解耦为标准 Python 策略包，确保 367 项单元测试 100% 隔离安全。
 
-**意图识别（v2.8.0 新增）**
-- ✅ 四意图自动路由：stock / career / life / chat
-- ✅ 规则匹配引擎（keywords + patterns，零 token 消耗）
-- ✅ 向量知识库检索适配器（Qdrant，按意图分类过滤，默认关闭）
-- ✅ LLM 生成层（MiniMax / OpenAI 兼容格式，可选）
+**意图识别与角色框架**
+- ✅ Z哥投资决策框架（SKILL.md，宿主直接加载）
 - ✅ Z哥职业决策框架（rules/career_prompt.md）
 - ✅ Z哥人生决策框架（rules/life_prompt.md）
+
+> 在 Claude Code / Cursor 等宿主中，意图识别、角色化回答由宿主 LLM 直接完成（读取 SKILL.md + knowledge/），项目本身不内置 LLM/RAG 服务。
 
 **数据层**
 - ✅ Tushare 真实行情接入（日线 OHLCV、资金流向、财报、财务指标）
@@ -96,10 +94,10 @@
 - ✅ 策略组合回测（多策略融合 + 资金曲线 + 仓位管理）
 - ✅ 随堂交易记录（口语化输入 → 战法匹配 → Z 哥点评）
 
-**LLM 角色层**
+**角色层（由宿主 LLM 承载）**
 - ✅ Z 哥角色扮演（用「我」而非「Z哥认为」）
 - ✅ 多轮问诊系统（周期 → 状态 → 仓位 → 诊断）
-- ✅ 随堂测试复盘（口语化输入 → 战法匹配 → LLM 点评）
+- ✅ 随堂测试复盘（口语化输入 → 战法匹配 → 宿主点评）
 
 ---
 
@@ -137,9 +135,7 @@ DB_PATH=data/stock_data.db
 > 
 > **中转 API**：需要配置中转地址，可从 Tushare 中转服务商获取。
 > 
-> **LLM 配置**：可选，配置 `LLM_API_KEY` 后可使用 LLM 生成回答；未配置时仅显示意图识别结果。
-> 
-> **向量知识库**：默认关闭，设置 `KB_ENABLED=true` 并配置 `KB_API_URL` 可开启 RAG 检索。
+> 角色化回答（Z 哥点评、问诊、复盘）由宿主 LLM（Claude Code / Cursor）直接读取 `SKILL.md` + `knowledge/` 完成，项目本身不需要配置 LLM/知识库服务。
 
 ### 3. 初始化
 
@@ -395,23 +391,22 @@ for k in klines[-5:]:
 | 模式 | 环境变量 | 说明 |
 |------|---------|------|
 | **JNB 模式** | `DATA_MODE=jnb` | 接入 Tushare 真实行情，具备实时数据查询、技术指标计算、战法识别能力 |
-| **普通小万** | `DATA_MODE=websearch` | 纯 LLM 对话，不走任何外部数据接口 |
+| **纯框架模式** | `DATA_MODE=websearch` | 不连数据接口，宿主（Claude Code/Cursor）直接读 SKILL.md + knowledge/ 回答 |
 
 ### 项目结构
 
 ```
 zettaranc-skill/
-├── SKILL.md                    # 核心 Skill 文件（LLM 角色扮演协议）
+├── SKILL.md                    # 核心 Skill 文件（Z哥角色扮演协议，宿主直接加载）
 ├── README.md                   # 本文件
 ├── CHANGELOG.md                # 版本变更日志
 ├── AGENTS.md                   # AI Agent 开发指南
 ├── docs/
 │   ├── USER_GUIDE.md           # 详细使用手册与操作手册
-│   ├── CONFIG_GUIDE.md         # 配置指南（v2.8.0 新增）
+│   ├── CONFIG_GUIDE.md         # 配置指南
 │   └── CHANGELOG.md            # 版本变更日志
 ├── .env / .env.example         # 本地配置
-├── rules/                      # 意图识别规则与角色框架（v2.8.0 新增）
-│   ├── intent_rules.yaml       # 意图匹配规则（keywords + patterns）
+├── rules/                      # Z哥角色框架（宿主直接加载）
 │   ├── career_prompt.md        # Z哥职业决策框架
 │   └── life_prompt.md          # Z哥人生决策框架
 ├── data/
@@ -436,15 +431,10 @@ zettaranc-skill/
 │   ├── watchlist.py            # 自选股观察池
 │   ├── cli.py                  # 命令行工具入口（analyze/screen/backtest/trade/daily）
 │   ├── cli_commands.py         # 扩展命令（backtest/trade/daily）
-│   ├── intent_router.py        # 意图识别与路由（v2.8.0 新增）
-│   ├── knowledge_retriever.py  # 向量知识库检索适配器（v2.8.0 新增）
-│   ├── intent_chat.py          # 意图聊天界面（v2.8.0 新增）
-│   ├── llm_providers.py        # LLM 提供商（v2.8.0 新增）
 │   ├── trade_parser.py         # 口语化输入解析
 │   ├── trade_manager.py        # 交易记录 CRUD
-│   ├── trade_reviewer.py       # 交割单数据准备层（给 LLM 用）
-│   ├── setup_wizard.py         # 初始化配置向导
-│   └── trade_reviewer.py       # 交割单数据准备层（含 Z 哥话术常量）
+│   ├── trade_reviewer.py       # 交割单数据准备层（含 Z 哥话术常量，给宿主用）
+│   └── setup_wizard.py         # 初始化配置向导
 ├── knowledge/                  # 知识文档（14篇交易体系）
 ├── tests/                      # 单元测试（pytest，543 用例，24 个测试文件）
 ├── scripts/                    # 工具脚本（薄壳，业务逻辑在 modules/）
@@ -505,7 +495,7 @@ zettaranc-skill/
 
 ### 关键设计原则
 
-**Python 层只做数据准备，所有点评由 LLM 用 Z哥角色生成。宿主通过 CLI `--json` 获取结构化数据。**
+**Python 层只做数据准备，所有点评由宿主 LLM（Claude Code / Cursor）用 Z哥角色生成。宿主通过 CLI `--json` 获取结构化数据。**
 
 ```
 用户输入 → 宿主(Claude Code/Cursor) → 调用 CLI 工具(zt analyze/screen/backtest --json)
@@ -522,7 +512,7 @@ Tushare API → data_sync → SQLite → indicators/ → strategies/ → backtes
                                               ↓
                                     loop_engine（少妇六步闭环）
                                               ↓
-                                    SKILL.md (LLM 角色层 + 工具描述)
+                                    SKILL.md (宿主角色层 + 工具描述)
 ```
 
 ---

@@ -66,15 +66,16 @@
 
 ---
 
-## ✅ 已完成（v2.8.0 意图识别编排层）
+## ⛔️ 已移除（v2.8.0 意图识别编排层 → 适配 Claude Code 后下线）
 
-- [x] 意图识别规则引擎（rules/intent_rules.yaml）
-- [x] 四意图路由：stock / career / life / chat
-- [x] 向量知识库适配器（modules/knowledge_retriever.py，Qdrant RAG，默认关闭）
-- [x] LLM 生成层（MiniMax / OpenAI 兼容，可选）
-- [x] Z哥职业决策框架（rules/career_prompt.md）
-- [x] Z哥人生决策框架（rules/life_prompt.md）
-- [x] 交互式聊天界面（modules/intent_chat.py）
+> 该层用于给「没有大脑的宿主」补 LLM/RAG 能力。在 Claude Code / Cursor 等宿主中，意图识别与角色化回答由宿主 LLM 直接完成（读取 SKILL.md + knowledge/），故下线整层，仅保留 Z 哥角色框架文件。
+
+- [~] ~~意图识别规则引擎（rules/intent_rules.yaml）~~ — 已删除
+- [~] ~~四意图路由 / 交互式聊天界面（modules/intent_router.py、intent_chat.py）~~ — 已删除
+- [~] ~~向量知识库适配器（modules/knowledge_retriever.py，Qdrant RAG）~~ — 已删除
+- [~] ~~LLM 生成层（modules/llm_providers.py，MiniMax / OpenAI 兼容）~~ — 已删除
+- [x] Z哥职业决策框架（rules/career_prompt.md）— 保留，宿主直接加载
+- [x] Z哥人生决策框架（rules/life_prompt.md）— 保留，宿主直接加载
 - [x] 配置指南文档（docs/CONFIG_GUIDE.md）
 
 ---

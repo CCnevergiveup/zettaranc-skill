@@ -1591,19 +1591,21 @@ wheels = [
 
 [[package]]
 name = "zettaranc-skill"
-version = "2.10.0"
+version = "3.2.0"
 source = { editable = "." }
 dependencies = [
-    { name = "faster-whisper" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "python-dotenv" },
     { name = "requests" },
     { name = "tushare" },
-    { name = "yt-dlp" },
 ]
 
 [package.optional-dependencies]
+corpus = [
+    { name = "faster-whisper" },
+    { name = "yt-dlp" },
+]
 dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -1612,7 +1614,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "faster-whisper", specifier = ">=1.0.0" },
+    { name = "faster-whisper", marker = "extra == 'corpus'", specifier = ">=1.0.0" },
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0" },
@@ -1620,6 +1622,6 @@ requires-dist = [
     { name = "requests", specifier = ">=2.28.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
     { name = "tushare", specifier = ">=1.4.0" },
-    { name = "yt-dlp", specifier = ">=2024.1.0" },
+    { name = "yt-dlp", marker = "extra == 'corpus'", specifier = ">=2024.1.0" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["dev", "corpus"]

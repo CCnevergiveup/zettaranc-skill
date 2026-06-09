@@ -22,12 +22,12 @@
 | 模式 | 环境变量 | 说明 |
 |------|---------|------|
 | **JNB 模式** | `DATA_MODE=jnb` | 接入 Tushare 真实行情，具备实时数据查询、技术指标计算、战法识别能力 |
-| **普通小万** | `DATA_MODE=websearch` | 纯 LLM 对话，不走任何外部数据接口 |
+| **离线模式** | `DATA_MODE=websearch` | 不连数据接口，仅由宿主 LLM 读取 SKILL.md / knowledge 回答 |
 
 架构分层：
 
 ```
-Python 数据层（modules/）              LLM 角色层（SKILL.md）
+Python 数据层（modules/）              角色层（SKILL.md，宿主 LLM 承载）
 ├─ tushare_client.py     API 封装         ├─ 角色扮演规则
 ├─ database.py           SQLite 管理       ├─ Agentic Protocol（含编排/分流逻辑）
 ├─ data_sync.py          数据同步          ├─ 9 个核心心智模型（新增 3 个）
@@ -46,9 +46,8 @@ Python 数据层（modules/）              LLM 角色层（SKILL.md）
 ├─ cli.py                命令行工具
 ├─ trade_parser.py       口语化输入解析
 ├─ trade_manager.py      交易记录 CRUD
-├─ trade_reviewer.py     数据准备层（给 LLM 用）
-├─ setup_wizard.py       初始化配置向导
-└─ trade_reviewer.py     交割单数据准备层（含 Z 哥话术常量）
+├─ trade_reviewer.py     交割单数据准备层（含 Z 哥话术常量，给宿主 LLM 用）
+└─ setup_wizard.py       初始化配置向导
 
 knowledge/（知识文件，新增 3 个）
 ├─ trading-core.md       短线交易核心
@@ -73,7 +72,7 @@ knowledge/（知识文件，新增 3 个）
 └─ business-judgment.md  创业/商业判断框架（新增）
 ```
 
-**关键设计原则**：Python 层只负责**数据准备**，所有点评、分析话术由 LLM 用 Z哥角色生成，避免"AI味"。
+**关键设计原则**：Python 层只负责**数据准备**，所有点评、分析话术由宿主 LLM（Claude Code / Cursor）用 Z哥角色生成，避免"AI味"。项目本身不内置 LLM/RAG 服务。
 
 ---
 
@@ -145,8 +144,7 @@ zettaranc-skill/
 │   ├── TODO.md                 # 待办与路线图
 │   ├── CONTRIBUTING.md         # 贡献指南
 │   ├── USER_GUIDE.md           # 详细使用手册
-│   ├── CONFIG_GUIDE.md         # 配置指南
-│   └── intent-router-design.md # 意图路由设计文档
+│   └── CONFIG_GUIDE.md         # 配置指南
 ├── modules/                    # Python 代码模块（~11800 行）
 │   ├── __init__.py             # 包导出 + get_data_mode() + dotenv 统一加载
 │   ├── database.py             # SQLite 数据库管理：8 张表、事务上下文、CRUD
@@ -166,14 +164,9 @@ zettaranc-skill/
 │   ├── cli.py                  # 命令行工具入口（analyze/screen/watchlist/diagnose）
 │   ├── trade_parser.py         # 随堂测试解析器：口语化/JSON/CSV 多格式输入
 │   ├── trade_manager.py        # 交易记录 CRUD、持仓计算、盈亏统计
-│   ├── trade_reviewer.py       # 交割单数据准备层：ReviewContext → LLM 提示词
+│   ├── trade_reviewer.py       # 交割单数据准备层：ReviewContext → 宿主点评提示词
 │   ├── report.py               # Z哥量化评估报告（assess_watchlist + render + write）
-│   ├── intent_router.py        # 意图路由：YAML 规则匹配
-│   ├── intent_chat.py          # LLM 聊天接口
-│   ├── knowledge_retriever.py  # RAG 知识检索
-│   ├── llm_providers.py        # LLM 提供者抽象
-│   ├── setup_wizard.py         # 初始化向导：JNB/websearch 双模式切换、API 连通性测试
-│   └── report.py               # Z哥量化评估报告（assess_watchlist + render + write）
+│   └── setup_wizard.py         # 初始化向导：JNB/websearch 双模式切换、API 连通性测试
 ├── knowledge/                  # 知识文档（14+ 篇交易体系）
 │   ├── trading-core.md         # 四层交易结构、少妇战法 SOP、B1/B2/B3、量比战法
 │   ├── indicators.md           # MACD 一票否决、筹码理论、麒麟会、三波理论
@@ -209,7 +202,6 @@ zettaranc-skill/
 │   ├── test_data_sync_extensions.py  # DataSyncer 新方法 + 薄壳脚本测试
 │   ├── test_indicator_cache.py # 指标缓存测试
 │   ├── test_indicators_realdata.py   # 真实数据指标测试
-│   ├── test_intent_router.py   # 意图路由测试
 │   ├── test_quality_check.py   # quality_check.py 测试
 │   └── test_rate_limiter.py    # 限流器测试
 ├── scripts/                    # 工具脚本（薄壳，业务逻辑在 modules/）
@@ -395,7 +387,6 @@ python corpus/quality_check.py SKILL.md
 | `test_data_sync_extensions.py` | DataSyncer 新方法、薄壳脚本、行数约束 | ~29 |
 | `test_indicator_cache.py` | 指标缓存读写 | ~5 |
 | `test_indicators_realdata.py` | 真实 Tushare 数据指标验证 | ~9 |
-| `test_intent_router.py` | 意图路由规则匹配 | ~5 |
 | `test_quality_check.py` | corpus/quality_check.py 8 项检查 | ~10 |
 | `test_rate_limiter.py` | _RateLimiter 多进程安全限流 | ~14 |
 

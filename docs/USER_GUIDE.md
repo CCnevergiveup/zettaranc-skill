@@ -41,7 +41,7 @@ zettaranc-skill 是一个**AI 思维框架蒸馏包 + 真实数据量化工具**
 | 模式 | 环境变量 | 说明 |
 |------|---------|------|
 | **JNB 模式** | `DATA_MODE=jnb` | 接入 Tushare 真实行情，60+ 技术指标实时计算，30+ 战法自动识别，选股、回测、持仓诊断全开 |
-| **普通小万** | `DATA_MODE=websearch` | 纯 LLM 对话模式，不走任何外部数据接口，只聊框架和逻辑 |
+| **普通小万** | `DATA_MODE=websearch` | 不走外部行情接口，由宿主（Claude Code / Cursor）直接读 SKILL.md + knowledge/ 对话 |
 
 ### 1.2 架构分层
 
@@ -62,7 +62,7 @@ portfolio_diagnosis.py（持股诊断：防卖飞评分、出货信号、止损/
     ↓
 backtest.py（策略组合回测：胜率/夏普/最大回撤）
     ↓
-SKILL.md（LLM 角色层：Z 哥视角点评、多轮问诊、表达 DNA）
+SKILL.md（角色层，由宿主 LLM 承载：Z 哥视角点评、多轮问诊、表达 DNA）
 ```
 
 ### 1.3 技术栈
@@ -496,7 +496,7 @@ from modules.trade_reviewer import TradeReviewer
 
 reviewer = TradeReviewer()
 context = reviewer.prepare_review_context("600487.SH")
-# 准备交割单数据 + K线 + 指标 + 战法信号，供 LLM 用 Z哥角色点评
+# 准备交割单数据 + K线 + 指标 + 战法信号，供宿主用 Z哥角色点评
 ```
 
 ---

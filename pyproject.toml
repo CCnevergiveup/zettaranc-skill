@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zettaranc-skill"
-version = "2.10.0"
-description = "zettaranc（万千）的思维框架与量化工具"
+version = "3.2.0"
+description = "zettaranc（万千）的思维框架与量化工具（Claude Code 适配版）"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
@@ -23,9 +23,8 @@ classifiers = [
     "Topic :: Office/Business :: Financial :: Investment",
 ]
 
+# 运行时核心依赖：数据接入（Tushare）+ 数据处理（pandas）+ 配置（dotenv）
 dependencies = [
-    "yt-dlp>=2024.1.0",
-    "faster-whisper>=1.0.0",
     "tushare>=1.4.0",
     "python-dotenv>=1.0.0",
     "pandas>=2.0.0",
@@ -37,6 +36,12 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.8.0",
+]
+# 语料采集工具（仅 corpus/ 下脚本需要：B站下载 + Whisper 转录）
+# 日常量化分析与 Claude Code 集成无需安装
+corpus = [
+    "yt-dlp>=2024.1.0",
+    "faster-whisper>=1.0.0",
 ]
 
 [project.scripts]

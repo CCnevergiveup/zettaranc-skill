@@ -1,6 +1,10 @@
-yt-dlp>=2024.1.0
-faster-whisper>=1.0.0
+# 运行时核心依赖（量化分析 + Claude Code 集成）
+# 推荐改用 uv：uv sync --extra dev
 tushare>=1.4.0
 python-dotenv>=1.0.0
 pandas>=2.0.0
 requests>=2.28.0
+
+# 语料采集工具（仅 corpus/ 下脚本需要，日常无需安装）：
+#   pip install yt-dlp faster-whisper
+# 或：uv sync --extra corpus
