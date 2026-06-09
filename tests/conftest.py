@@ -18,7 +18,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 @pytest.fixture(autouse=True)
 def mock_env_for_tests():
     """所有测试自动设置 mock 环境变量"""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    # ignore_cleanup_errors：Windows 下 SQLite 句柄释放有延迟，
+    # 临时目录删除可能抛 WinError 32（文件占用）；忽略清理错误避免 teardown 误报
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = os.path.join(tmpdir, "test.db")
         env_vars = {
             "DATA_MODE": "websearch",

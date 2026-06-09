@@ -11,8 +11,14 @@ import multiprocessing
 import time
 from pathlib import Path
 
+import pytest
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# fork 启动方式仅 Unix 可用；Windows / macOS spawn 默认下跳过 fork 专项用例
+_HAS_FORK = "fork" in multiprocessing.get_all_start_methods()
+_requires_fork = pytest.mark.skipif(not _HAS_FORK, reason="当前平台不支持 multiprocessing fork（Windows 无 fork）")
 
 
 # ==================== 模块级 _RateLimiter 存在性 ====================
@@ -120,6 +126,7 @@ def _child_wait_n_times(n: int, max_per_min: int) -> int:
     return rl.current_count
 
 
+@_requires_fork
 def test_rate_limiter_works_in_subprocess():
     """_RateLimiter 必须在子进程中能正常工作（multiprocessing.Lock 可继承）"""
     # 子进程中调 3 次 wait()，current_count 应为 3
@@ -130,6 +137,7 @@ def test_rate_limiter_works_in_subprocess():
     assert count == 3, f"子进程 current_count={count}（期望 3）"
 
 
+@_requires_fork
 def test_rate_limiter_works_across_multiple_subprocesses():
     """多子进程并发调 wait() 必须全部成功（multiprocessing.Lock 序列化）"""
     ctx = multiprocessing.get_context("fork")
