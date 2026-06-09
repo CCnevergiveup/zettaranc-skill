@@ -86,10 +86,10 @@ SKILL.md（LLM 角色层：Z 哥视角点评、多轮问诊、表达 DNA）
 ```bash
 git clone https://github.com/lululu811/zettaranc-skill.git
 cd zettaranc-skill
-pip install -r requirements.txt
+uv sync --extra dev
 ```
 
-安装完成后会注册 `zt` 命令（快捷入口）。如不安装，也可以 `python -m modules.cli` 调用。
+安装完成后可通过 `uv run zt` 使用快捷入口，也可以通过 `uv run python -m modules.cli` 调用。兼容安装方式：`pip install -r requirements.txt` 或 `pip install -e .`。
 
 ### 2.2 配置
 
@@ -121,7 +121,7 @@ DB_PATH=data/stock_data.db
 
 ```bash
 # 测试连通性
-python -c "from modules.setup_wizard import test_jnb_connection; import os; print(test_jnb_connection(os.environ['TUSHARE_TOKEN']))"
+uv run python -c "from modules.setup_wizard import test_jnb_connection; import os; print(test_jnb_connection(os.environ['TUSHARE_TOKEN']))"
 
 # 预期输出: True
 ```
@@ -144,10 +144,10 @@ python -c "from modules.setup_wizard import test_jnb_connection; import os; prin
 
 ```bash
 # 切换到 websearch 模式（纯对话，不需要 Token）
-python -c "from modules.setup_wizard import write_env_file; write_env_file(mode='websearch')"
+uv run python -c "from modules.setup_wizard import write_env_file; write_env_file(mode='websearch')"
 
 # 切换回 JNB 模式（需 Token）
-python -c "from modules.setup_wizard import write_env_file; write_env_file(token='你的token', mode='jnb')"
+uv run python -c "from modules.setup_wizard import write_env_file; write_env_file(token='你的token', mode='jnb')"
 ```
 
 ---
@@ -157,7 +157,7 @@ python -c "from modules.setup_wizard import write_env_file; write_env_file(token
 ### 4.1 初始化数据库（只需做一次）
 
 ```bash
-python -m modules.database
+uv run python -m modules.database
 ```
 
 创建 8 张表：
@@ -173,7 +173,7 @@ python -m modules.database
 ### 4.2 同步股票基本信息
 
 ```bash
-python -m modules.data_sync sync
+uv run python -m modules.data_sync sync
 ```
 
 同步全量 5500+ 只 A 股基本信息，以及所有股票的 2 年日线数据。
@@ -184,16 +184,16 @@ python -m modules.data_sync sync
 
 ```bash
 # 同步单只股票日线（最近 365 天）
-python -m modules.data_sync sync --ts_code 600487.SH --days 365
+uv run python -m modules.data_sync sync --ts_code 600487.SH --days 365
 
 # 同步并计算指标缓存
-python -m modules.data_sync sync --ts_code 600487.SH --days 365 --indicators
+uv run python -m modules.data_sync sync --ts_code 600487.SH --days 365 --indicators
 ```
 
 ### 4.4 查看同步状态
 
 ```bash
-python -m modules.data_sync status
+uv run python -m modules.data_sync status
 ```
 
 输出示例：
@@ -212,7 +212,7 @@ K线数据: 25591
 ### 4.5 同步 Tushare 官方指标（用于验证）
 
 ```bash
-python -m modules.data_sync stk-factor --ts_code 600487.SH --days 365
+uv run python -m modules.data_sync stk-factor --ts_code 600487.SH --days 365
 ```
 
 同步 Tushare 官方计算的 stk_factor 指标，用于与本项目自研指标做 diff 验证。
@@ -229,10 +229,10 @@ python -m modules.data_sync stk-factor --ts_code 600487.SH --days 365
 
 ```bash
 # 分析单只股票（默认 120 天）
-python -m modules.cli analyze 600487.SH
+uv run zt analyze 600487.SH
 
 # 指定分析天数
-python -m modules.cli analyze 600487.SH --days 60
+uv run zt analyze 600487.SH --days 60
 ```
 
 ### 5.2 分析内容
@@ -267,25 +267,25 @@ print(f"卖分: {result.sell_score}")
 
 ```bash
 # B1 选股扫描（默认 25 只）
-python -m modules.cli screen --strategy B1 --limit 20
+uv run zt screen --strategy B1 --limit 20
 
 # 完美图形扫描
-python -m modules.cli screen --strategy 完美图形 --limit 10
+uv run zt screen --strategy 完美图形 --limit 10
 
 # 超级 B1
-python -m modules.cli screen --strategy 超级B1 --limit 10
+uv run zt screen --strategy 超级B1 --limit 10
 
 # 建仓波选股
-python -m modules.cli screen --strategy 建仓波 --limit 20
+uv run zt screen --strategy 建仓波 --limit 20
 
 # 吸筹阶段
-python -m modules.cli screen --strategy 吸筹 --limit 20
+uv run zt screen --strategy 吸筹 --limit 20
 
 # 安全标的
-python -m modules.cli screen --strategy 安全 --limit 20
+uv run zt screen --strategy 安全 --limit 20
 
 # 全市场扫描（无策略限制）
-python -m modules.cli screen
+uv run zt screen
 ```
 
 ### 6.2 支持的筛选策略
@@ -315,27 +315,27 @@ python -m modules.cli screen
 
 ```bash
 # 添加单只股票
-python -m modules.cli watchlist add 600487.SH
+uv run zt watchlist add 600487.SH
 
 # 添加带标签
-python -m modules.cli watchlist add 600487.SH --tags 通信设备,5G,波段
-python -m modules.cli watchlist add 600036.SH --tags 银行,价值
+uv run zt watchlist add 600487.SH --tags 通信设备,5G,波段
+uv run zt watchlist add 600036.SH --tags 银行,价值
 ```
 
 ### 7.2 查看自选股
 
 ```bash
 # 查看所有
-python -m modules.cli watchlist list
+uv run zt watchlist list
 
 # 按标签筛选
-python -m modules.cli watchlist list --tags 银行
+uv run zt watchlist list --tags 银行
 ```
 
 ### 7.3 批量扫描信号
 
 ```bash
-python -m modules.cli watchlist scan
+uv run zt watchlist scan
 ```
 
 对观察池中所有股票进行批量战法识别，输出每只股票的当前信号。
@@ -343,7 +343,7 @@ python -m modules.cli watchlist scan
 ### 7.4 移除自选股
 
 ```bash
-python -m modules.cli watchlist remove 600487.SH
+uv run zt watchlist remove 600487.SH
 ```
 
 ### 7.5 Python API
@@ -368,10 +368,10 @@ wl.remove("600487.SH")
 
 ```bash
 # 诊断单只股票
-python -m modules.cli diagnose 600487.SH
+uv run zt diagnose 600487.SH
 
 # 指定诊断天数
-python -m modules.cli diagnose 600487.SH --days 100
+uv run zt diagnose 600487.SH --days 100
 ```
 
 ### 8.2 诊断内容
@@ -667,12 +667,12 @@ print(f"最新价: {data.close}, 涨跌: {data.pct_chg}%")
 
 ```bash
 # 全部测试（预期：261 passed, 1 skipped）
-python -m pytest tests/ -v
+uv run python -m pytest tests/ -v
 
 # 单文件测试
-python -m pytest tests/test_indicators.py -v
-python -m pytest tests/test_strategies.py -v
-python -m pytest tests/test_screener.py -v
+uv run python -m pytest tests/test_indicators.py -v
+uv run python -m pytest tests/test_strategies.py -v
+uv run python -m pytest tests/test_screener.py -v
 ```
 
 ### 14.2 测试覆盖范围
@@ -707,27 +707,27 @@ python scripts/quality_check.py SKILL.md
 
 ```bash
 # Step 1: 更新数据（增量同步）
-python -m modules.data_sync sync --ts_code 600487.SH --days 1
+uv run python -m modules.data_sync sync --ts_code 600487.SH --days 1
 
 # Step 2: 查看观察池信号
-python -m modules.cli watchlist scan
+uv run zt watchlist scan
 
 # Step 3: B1 选股扫描
-python -m modules.cli screen --strategy B1 --limit 20
+uv run zt screen --strategy B1 --limit 20
 
 # Step 4: 诊断持仓
-python -m modules.cli diagnose 600487.SH
+uv run zt diagnose 600487.SH
 
 # Step 5: 分析感兴趣的股票
-python -m modules.cli analyze 000001.SZ
-python -m modules.cli analyze 600519.SH
+uv run zt analyze 000001.SZ
+uv run zt analyze 600519.SH
 ```
 
 ### 15.2 每周维护
 
 ```bash
 # 更新股票基本信息（变动不频繁，每周一次）
-python -m modules.data_sync sync
+uv run python -m modules.data_sync sync
 
 # 同步资金流数据
 python -c "
@@ -740,14 +740,14 @@ for d in range(5):
 "
 
 # 运行全量测试
-python -m pytest tests/ -v
+uv run python -m pytest tests/ -v
 ```
 
 ### 15.3 每月维护
 
 ```bash
 # 同步 Tushare 官方指标（diff 验证用）
-python -m modules.data_sync stk-factor --ts_code 600487.SH --days 30
+uv run python -m modules.data_sync stk-factor --ts_code 600487.SH --days 30
 
 # 同步财务数据
 python -c "
@@ -756,7 +756,7 @@ from modules.scripts import sync_missing_data
 "
 
 # 检查数据库状态
-python -m modules.data_sync status
+uv run python -m modules.data_sync status
 ```
 
 ---

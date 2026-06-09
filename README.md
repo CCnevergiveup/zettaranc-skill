@@ -110,10 +110,10 @@
 ```bash
 git clone https://github.com/lululu811/zettaranc-skill.git
 cd zettaranc-skill
-pip install -r requirements.txt
+uv sync --extra dev
 ```
 
-> 安装完成后会注册 `zt` 命令（`zt analyze`、`zt screen`、`zt watchlist`、`zt diagnose`）。如不安装，也可直接 `python -m modules.cli` 调用。
+> 推荐使用 `uv` 管理环境和依赖；`uv run zt ...` 会自动使用项目虚拟环境。兼容安装方式：`pip install -r requirements.txt` 或 `pip install -e .`。
 
 ### 2. 配置
 
@@ -125,7 +125,12 @@ cp .env.example .env
 
 ```ini
 DATA_MODE=jnb
-TUSHARE_TOKEN=你...n
+TUSHARE_TOKEN=你的 Tushare Token
+TUSHARE_API_URL=https://你的中转 API 地址
+DATA_DIR=data
+DB_PATH=data/stock_data.db
+```
+
 > **数据模式**：`DATA_MODE=jnb` 时必须配置 Tushare Token 和 API URL；`DATA_MODE=websearch` 时可留空。
 > 
 > **Token 获取**：前往 [Tushare 官网](https://tushare.pro/user/token) 注册。
@@ -136,37 +141,33 @@ TUSHARE_TOKEN=你...n
 > 
 > **向量知识库**：默认关闭，设置 `KB_ENABLED=true` 并配置 `KB_API_URL` 可开启 RAG 检索。
 
-> **Token 获取**：前往 [Tushare 官网](https://tushare.pro/user/token) 注册。
-> 
-> **中转 API**：需要配置中转地址，可从 Tushare 中转服务商获取。
-
 ### 3. 初始化
 
 ```bash
 # 创建数据库（8张表）
-python -m modules.database
+uv run python -m modules.database
 
 # 同步股票基本信息（5525只，只需执行一次）
-python -m modules.data_sync sync
+uv run python -m modules.data_sync sync
 
 # 同步单只股票K线 + 指标缓存
-python -m modules.data_sync sync --ts_code 600487.SH --days 120
+uv run python -m modules.data_sync sync --ts_code 600487.SH --days 120 --indicators
 ```
 
 ### 4. 验证
 
 ```bash
 # 运行测试（543 passed, 10 skipped）
-python -m pytest tests/ -v
+uv run python -m pytest tests/ -v
 
 # 分析一只股票
-python -m modules.cli analyze 600487.SH
+uv run zt analyze 600487.SH
 
 # 选股扫描
-python -m modules.cli screen --strategy B1 --limit 20
+uv run zt screen --strategy B1 --limit 20
 
 # 少妇战法回测
-python -m modules.cli backtest shaofu 600487.SH --days 250
+uv run zt backtest shaofu 600487.SH --days 250
 ```
 
 ---
@@ -179,119 +180,119 @@ python -m modules.cli backtest shaofu 600487.SH --days 250
 
 ```bash
 # 完整分析（技术指标 + 战法识别 + 信号判断）
-python -m modules.cli analyze 600487.SH
+uv run zt analyze 600487.SH
 
 # 指定分析天数
-python -m modules.cli analyze 600487.SH --days 60
+uv run zt analyze 600487.SH --days 60
 ```
 
 ### 选股扫描
 
 ```bash
 # B1 选股
-python -m modules.cli screen --strategy B1 --limit 20
+uv run zt screen --strategy B1 --limit 20
 
 # 完美图形
-python -m modules.cli screen --strategy 完美图形 --limit 10
+uv run zt screen --strategy 完美图形 --limit 10
 
 # 超级 B1
-python -m modules.cli screen --strategy 超级B1 --limit 10
+uv run zt screen --strategy 超级B1 --limit 10
 
 # 建仓波选股
-python -m modules.cli screen --strategy 建仓波 --limit 20
+uv run zt screen --strategy 建仓波 --limit 20
 
 # 吸筹阶段
-python -m modules.cli screen --strategy 吸筹 --limit 20
+uv run zt screen --strategy 吸筹 --limit 20
 
 # 安全标的
-python -m modules.cli screen --strategy 安全 --limit 20
+uv run zt screen --strategy 安全 --limit 20
 ```
 
 ### 观察池
 
 ```bash
 # 添加自选股
-python -m modules.cli watchlist add 600487.SH --tags 波段,通信
+uv run zt watchlist add 600487.SH --tags 波段,通信
 
 # 查看观察池
-python -m modules.cli watchlist list
+uv run zt watchlist list
 
 # 批量扫描信号
-python -m modules.cli watchlist scan
+uv run zt watchlist scan
 
 # 移除
-python -m modules.cli watchlist remove 600487.SH
+uv run zt watchlist remove 600487.SH
 ```
 
 ### 持仓诊断
 
 ```bash
 # 诊断单只股票
-python -m modules.cli diagnose 600487.SH
+uv run zt diagnose 600487.SH
 
 # 指定诊断天数
-python -m modules.cli diagnose 600487.SH --days 100
+uv run zt diagnose 600487.SH --days 100
 
 # JSON 输出（宿主可直接解析）
-python -m modules.cli diagnose 600487.SH --json
+uv run zt diagnose 600487.SH --json
 ```
 
 ### 策略回测
 
 ```bash
 # 少妇战法六步闭环回测
-python -m modules.cli backtest shaofu 600487.SH --days 250
+uv run zt backtest shaofu 600487.SH --days 250
 
 # 多策略融合回测
-python -m modules.cli backtest multi 600487.SH --strategy b1,b2
+uv run zt backtest multi 600487.SH --strategy b1,b2
 
 # 多股票组合回测
-python -m modules.cli backtest portfolio 600487.SH,601318.SH
+uv run zt backtest portfolio 600487.SH,601318.SH
 
 # JSON 输出
-python -m modules.cli backtest shaofu 600487.SH --json
+uv run zt backtest shaofu 600487.SH --json
 ```
 
 ### 交易记录
 
 ```bash
 # 记录交易（口语化输入）
-python -m modules.cli trade add "4月25号买了100股茅台，1800块"
+uv run zt trade add "4月25号买了100股茅台，1800块"
 
 # 查看交易记录
-python -m modules.cli trade list
+uv run zt trade list
 
 # 复盘
-python -m modules.cli trade review
+uv run zt trade review
 
 # 统计
-python -m modules.cli trade stats
+uv run zt trade stats
 ```
 
 ### 每日工作流
 
 ```bash
 # 执行五步工作流（扫描观察池 + 选股 + 持仓检查 + 信号汇总 + 报告）
-python -m modules.cli daily
+uv run zt daily
 
 # JSON 输出
-python -m modules.cli daily --json
+uv run zt daily --json
 ```
 
 ### 数据同步
 
 ```bash
 # 查看同步状态
-python -m modules.data_sync status
+uv run python -m modules.data_sync status
 
 # 同步单只股票
-python -m modules.data_sync sync --ts_code 600487.SH --days 120
+uv run python -m modules.data_sync sync --ts_code 600487.SH --days 120
 
 # 同步并计算指标缓存
-python -m modules.data_sync sync --ts_code 600487.SH --days 120 --indicators
+uv run python -m modules.data_sync sync --ts_code 600487.SH --days 120 --indicators
 
 # 同步 Tushare 官方指标（用于 diff 验证）
-python -m modules.data_sync stk-factor --ts_code 600487.SH --days 365
+uv run python -m modules.data_sync stk-factor --ts_code 600487.SH --days 365
 ```
 
 ---
