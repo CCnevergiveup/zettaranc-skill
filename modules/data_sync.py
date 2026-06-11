@@ -102,9 +102,26 @@ class DataSyncer:
 
     def __init__(self, token: str | None = None):
         self.token = token or os.environ.get("TUSHARE_TOKEN")
+        self.data_mode = os.getenv("DATA_MODE", "websearch")
+
+        # 向后兼容：保留 instance-level attrs（外部可能引用）
+        # 但实际限流走模块级 _GLOBAL_LIMITER
+        self.last_request_time: dict[str, float] = {}
+        self.min_interval = 60.0 / 120
+
+        # ==================== 免费数据源模式 ====================
+        # baostock(K线/基本信息/估值) + AKShare(资金流)，无需 Tushare Token/中转
+        if self.data_mode == "free":
+            from .datasource import create_free_provider
+
+            self.provider = create_free_provider()
+            self.pro = None
+            return
+
+        # ==================== Tushare / JNB 模式 ====================
+        self.provider = None
         # 仅在 JNB 模式下强制检查 Tushare 配置
-        data_mode = os.getenv("DATA_MODE", "websearch")
-        if data_mode == "jnb":
+        if self.data_mode == "jnb":
             if not self.token:
                 raise ValueError("JNB 模式下未设置 TUSHARE_TOKEN，请检查 .env 文件。")
             if not TUSHARE_API_URL:
@@ -117,10 +134,6 @@ class DataSyncer:
         ts.set_token(self.token)
         self.pro = ts.pro_api()
         self.pro._DataApi__http_url = TUSHARE_API_URL
-
-        # 向后兼容：保留 instance-level attrs（外部可能引用）
-        # 但实际限流走模块级 _GLOBAL_LIMITER
-        # （v2.11.0 计划移除，改用 @property + DeprecationWarning）
 
     def _rate_limit(self, api_name: str):
         """线程安全的限流控制（v2.10.0 P1-4 改为调模块级 _GLOBAL_LIMITER）"""
@@ -175,10 +188,13 @@ class DataSyncer:
         """
         logger.info("开始同步股票基本信息...")
         try:
-            self._rate_limit("stock_basic")
-            df = self.pro.stock_basic(
-                exchange="", list_status="L", fields="ts_code,name,area,industry,market,list_date,is_hs"
-            )
+            if self.provider is not None:
+                df = self.provider.stock_basic()
+            else:
+                self._rate_limit("stock_basic")
+                df = self.pro.stock_basic(
+                    exchange="", list_status="L", fields="ts_code,name,area,industry,market,list_date,is_hs"
+                )
 
             if df is None or len(df) == 0:
                 logger.warning("获取股票基本信息失败")
@@ -187,7 +203,15 @@ class DataSyncer:
             # 填充 NaN 以免插入失败，且保留必要的列
             df = df[["ts_code", "name", "area", "industry", "market", "list_date", "is_hs"]].fillna("")
             with get_connection() as conn:
-                df.to_sql("stock_basic", conn, if_exists="append", index=False, method="multi")
+                cursor = conn.cursor()
+                cursor.executemany(
+                    """
+                    INSERT OR REPLACE INTO stock_basic
+                    (ts_code, name, area, industry, market, list_date, is_hs)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    list(df.itertuples(index=False, name=None)),
+                )
 
             self._log_sync("stock_basic", None, datetime.now().strftime("%Y%m%d"), "success")
             logger.info(f"股票基本信息同步完成，共 {len(df)} 只")
@@ -227,14 +251,18 @@ class DataSyncer:
             end_date = datetime.now().strftime("%Y%m%d")
 
         try:
-            self._rate_limit("daily_kline")
-            df = ts.pro_bar(
-                ts_code=ts_code,
-                start_date=start_date,
-                end_date=end_date,
-                adj="qfq",
-                api=self.pro,
-            )
+            if self.provider is not None:
+                # 免费模式：baostock 前复权日线（adjustflag=2，与 qfq 对齐）
+                df = self.provider.daily_kline(ts_code, start_date, end_date)
+            else:
+                self._rate_limit("daily_kline")
+                df = ts.pro_bar(
+                    ts_code=ts_code,
+                    start_date=start_date,
+                    end_date=end_date,
+                    adj="qfq",
+                    api=self.pro,
+                )
 
             if df is None or len(df) == 0:
                 return 0
@@ -323,8 +351,10 @@ class DataSyncer:
         logger.info(f"sync_missing: 共 {len(ts_codes)} 只，已有 {len(have)} 只，需补齐 {len(missing)} 只")
 
         results = {}
+        start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+        end_date = datetime.now().strftime("%Y%m%d")
         for code in missing:
-            count = self.sync_daily_kline(code, days=days)
+            count = self.sync_daily_kline(code, start_date=start_date, end_date=end_date)
             results[code] = count
         return results
 
@@ -385,7 +415,7 @@ class DataSyncer:
                     completed += 1
                 return ts_code, 0
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=_MAX_SYNC_WORKERS) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self._sync_workers()) as executor:
             futures = [executor.submit(sync_single, code) for code in ts_codes]
             for future in concurrent.futures.as_completed(futures):
                 code, count = future.result()
@@ -393,6 +423,12 @@ class DataSyncer:
 
         logger.info(f"批量同步完成，成功 {sum(1 for v in results.values() if v > 0)}/{len(ts_codes)}")
         return results
+
+    def _sync_workers(self) -> int:
+        """并发线程数：免费模式受 provider.max_workers 约束（baostock/AKShare 不宜高并发）。"""
+        if self.provider is not None:
+            return max(1, min(_MAX_SYNC_WORKERS, getattr(self.provider, "max_workers", 1)))
+        return _MAX_SYNC_WORKERS
 
     # ==================== 指标缓存 ====================
 
@@ -849,18 +885,22 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
         """
         try:
             self.ensure_daily_basic_columns()
-            self._rate_limit("daily_basic")
 
             if not start_date:
                 start_date = (datetime.now() - timedelta(days=730)).strftime("%Y%m%d")
             if not end_date:
                 end_date = datetime.now().strftime("%Y%m%d")
 
-            df = self.pro.daily_basic(
-                ts_code=ts_code,
-                start_date=start_date,
-                end_date=end_date,
-            )
+            if self.provider is not None:
+                # 免费模式：baostock 估值（peTTM/pbMRQ/psTTM），best-effort，缺失不阻断
+                df = self.provider.daily_basic(ts_code, start_date, end_date)
+            else:
+                self._rate_limit("daily_basic")
+                df = self.pro.daily_basic(
+                    ts_code=ts_code,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
 
             if df is None or len(df) == 0:
                 return 0
@@ -956,6 +996,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
         """
         同步单只股票的单日资金流向
 
+        免费模式（provider）：AKShare 一次返回最近约 120 日，内部按 trade_date 过滤入库。
+        Tushare 模式：调用单日 moneyflow 接口。
+
         Args:
             ts_code: 股票代码
             trade_date: 交易日期，格式 YYYYMMDD
@@ -963,6 +1006,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
         Returns:
             更新条数
         """
+        if self.provider is not None:
+            # 免费模式：拉历史后筛选指定单日
+            return self.sync_moneyflow_history(ts_code, start_date=trade_date, end_date=trade_date)
+
         try:
             self._rate_limit("moneyflow")
             df = self.pro.moneyflow(ts_code=ts_code, trade_date=trade_date)
@@ -970,47 +1017,98 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
             if df is None or len(df) == 0:
                 return 0
 
-            with get_connection() as conn:
-                cursor = conn.cursor()
-                records = []
-                for row in df.itertuples(index=False):
-                    row_dict = row._asdict()
-                    records.append(
-                        (
-                            row_dict["ts_code"],
-                            row_dict["trade_date"],
-                            row_dict.get("buy_sm_amount"),
-                            row_dict.get("buy_md_amount"),
-                            row_dict.get("buy_lg_amount"),
-                            row_dict.get("buy_elg_amount"),
-                            row_dict.get("sell_sm_amount"),
-                            row_dict.get("sell_md_amount"),
-                            row_dict.get("sell_lg_amount"),
-                            row_dict.get("sell_elg_amount"),
-                            row_dict.get("net_mf"),
-                            row_dict.get("pct_mf"),
-                        )
-                    )
-
-                cursor.executemany(
-                    """
-                    INSERT OR REPLACE INTO moneyflow
-                    (ts_code, trade_date, buy_sm_amount, buy_md_amount,
-                     buy_lg_amount, buy_elg_amount, sell_sm_amount,
-                     sell_md_amount, sell_lg_amount, sell_elg_amount,
-                     net_mf, pct_mf)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                    records,
-                )
+            records = [self._tushare_moneyflow_record(row._asdict()) for row in df.itertuples(index=False)]
+            self._write_moneyflow_records(records)
 
             self._log_sync("moneyflow", ts_code, trade_date, "success")
-            return len(df)
+            return len(records)
 
         except Exception as e:
             logger.error(f"资金流向同步失败 {ts_code} {trade_date}: {e}")
             self._log_sync("moneyflow", ts_code, "", "failed", str(e))
             return 0
+
+    def sync_moneyflow_history(
+        self, ts_code: str, days: int = 120, start_date: str | None = None, end_date: str | None = None
+    ) -> int:
+        """
+        同步单只股票的历史资金流向（免费模式 = AKShare 近约 120 日）
+
+        Args:
+            ts_code: 股票代码
+            days: 当未显式给定 start_date 时，回溯天数（默认 120）
+            start_date: 起始日期 YYYYMMDD（可选）
+            end_date: 结束日期 YYYYMMDD（可选）
+
+        Returns:
+            写入条数
+        """
+        if start_date is None:
+            start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+        if end_date is None:
+            end_date = datetime.now().strftime("%Y%m%d")
+
+        try:
+            if self.provider is not None:
+                df = self.provider.moneyflow(ts_code, start_date, end_date)
+            else:
+                # Tushare 模式：按股票代码 + 日期区间拉取
+                self._rate_limit("moneyflow")
+                df = self.pro.moneyflow(ts_code=ts_code, start_date=start_date, end_date=end_date)
+
+            if df is None or len(df) == 0:
+                logger.warning(f"资金流向无数据: {ts_code} {start_date}-{end_date}")
+                return 0
+
+            records = [self._tushare_moneyflow_record(row._asdict()) for row in df.itertuples(index=False)]
+            self._write_moneyflow_records(records)
+
+            latest_date = max((r[1] for r in records), default=end_date)
+            self._log_sync("moneyflow", ts_code, latest_date, "success")
+            logger.info(f"资金流向同步完成: {ts_code}, {len(records)} 条")
+            return len(records)
+
+        except Exception as e:
+            logger.error(f"资金流向历史同步失败 {ts_code}: {e}")
+            self._log_sync("moneyflow", ts_code, "", "failed", str(e))
+            return 0
+
+    @staticmethod
+    def _tushare_moneyflow_record(row_dict: dict) -> tuple:
+        """统一 moneyflow 行 -> 入库元组（兼容 Tushare 与 provider 字段）。"""
+        return (
+            row_dict["ts_code"],
+            row_dict["trade_date"],
+            row_dict.get("buy_sm_amount"),
+            row_dict.get("buy_md_amount"),
+            row_dict.get("buy_lg_amount"),
+            row_dict.get("buy_elg_amount"),
+            row_dict.get("sell_sm_amount"),
+            row_dict.get("sell_md_amount"),
+            row_dict.get("sell_lg_amount"),
+            row_dict.get("sell_elg_amount"),
+            row_dict.get("net_mf"),
+            row_dict.get("pct_mf"),
+        )
+
+    @staticmethod
+    def _write_moneyflow_records(records: list[tuple]) -> None:
+        """批量 upsert moneyflow 记录。"""
+        if not records:
+            return
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.executemany(
+                """
+                INSERT OR REPLACE INTO moneyflow
+                (ts_code, trade_date, buy_sm_amount, buy_md_amount,
+                 buy_lg_amount, buy_elg_amount, sell_sm_amount,
+                 sell_md_amount, sell_lg_amount, sell_elg_amount,
+                 net_mf, pct_mf)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                records,
+            )
 
     # ==================== 工具方法 ====================
 
@@ -1036,7 +1134,11 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
             """)
             sync_status = [dict(row) for row in cursor.fetchall()]
 
+            provider_name = self.provider.name if self.provider is not None else "tushare"
+
             return {
+                "data_mode": self.data_mode,
+                "provider": provider_name,
                 "stock_count": stock_count,
                 "kline_count": kline_count,
                 "db_path": str(get_db_path()),
@@ -1054,8 +1156,11 @@ def main():
     parser = argparse.ArgumentParser(description="Tushare 数据同步工具")
     parser.add_argument(
         "action",
-        choices=["init", "sync", "status", "stk-factor"],
-        help="操作: init=初始化数据库, sync=同步数据, status=查看状态, stk-factor=同步Tushare官方指标",
+        choices=["init", "sync", "status", "stk-factor", "moneyflow"],
+        help=(
+            "操作: init=初始化数据库, sync=同步数据, status=查看状态, "
+            "stk-factor=同步Tushare官方指标, moneyflow=同步资金流（免费模式走 AKShare）"
+        ),
     )
     parser.add_argument("--ts_code", help="股票代码，如 000001.SZ")
     parser.add_argument("--days", type=int, default=730, help="同步天数")
@@ -1082,6 +1187,10 @@ def main():
         if args.ts_code:
             # 同步单只股票
             syncer.sync_daily_kline(args.ts_code)
+            # 免费模式顺带同步资金流（AKShare，失败不阻断）
+            if syncer.provider is not None:
+                print(f"正在同步资金流: {args.ts_code} ...")
+                syncer.sync_moneyflow_history(args.ts_code, days=args.days)
             # 单只股票默认同步指标缓存（除非显式跳过）
             if not args.skip_indicators:
                 print(f"正在同步指标缓存: {args.ts_code} ...")
@@ -1113,11 +1222,21 @@ def main():
             success = sum(1 for v in results.values() if v > 0)
             print(f"批量同步完成，成功 {success}/{len(results)}")
 
+    elif args.action == "moneyflow":
+        syncer = DataSyncer()
+        if not args.ts_code:
+            print("请用 --ts_code 指定股票代码，如 --ts_code 600487.SH")
+        else:
+            print(f"正在同步资金流: {args.ts_code}（近 {args.days} 日）...")
+            count = syncer.sync_moneyflow_history(args.ts_code, days=args.days)
+            print(f"同步完成，{count} 条")
+
     elif args.action == "status":
         syncer = DataSyncer()
         status = syncer.get_sync_status()
         print("=" * 50)
         print(f"数据库: {status['db_path']}")
+        print(f"数据模式: {status.get('data_mode')} / 数据源: {status.get('provider')}")
         print(f"股票数量: {status['stock_count']}")
         print(f"K线数据: {status['kline_count']}")
         print("-" * 50)

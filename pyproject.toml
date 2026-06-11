@@ -37,6 +37,12 @@ dev = [
     "pytest-cov>=4.0.0",
     "ruff>=0.8.0",
 ]
+# 免费数据源（DATA_MODE=free）：baostock 提供 K 线/基本信息/估值，AKShare 提供资金流
+# 无需 Tushare Token / 中转 API，安装：uv sync --extra free-data
+free-data = [
+    "baostock>=0.9.1",
+    "akshare>=1.18.64",
+]
 # 语料采集工具（仅 corpus/ 下脚本需要：B站下载 + Whisper 转录）
 # 日常量化分析与 Claude Code 集成无需安装
 corpus = [
