@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "zettaranc-skill"
 version = "3.2.0"
-description = "zettaranc（万千）的思维框架与量化工具（Claude Code 适配版）"
+description = "zettaranc（万千）思维框架 AI Skill —— 在 Claude Code 中以自然语言驱动，uv run 触发数据脚本"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
@@ -32,36 +32,21 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# 开发工具：lint/format（脚本日常由 uv run 触发，依赖走 PEP723 内联声明）
 dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
     "ruff>=0.8.0",
 ]
 # 免费数据源（DATA_MODE=free）：baostock 提供 K 线/基本信息/估值，AKShare 提供资金流
-# 无需 Tushare Token / 中转 API，安装：uv sync --extra free-data
+# 脚本 PEP723 已内联声明，此处保留供本地开发 import modules.datasource 使用
 free-data = [
     "baostock>=0.9.1",
     "akshare>=1.18.64",
 ]
-# 语料采集工具（仅 corpus/ 下脚本需要：B站下载 + Whisper 转录）
-# 日常量化分析与 Claude Code 集成无需安装
-corpus = [
-    "yt-dlp>=2024.1.0",
-    "faster-whisper>=1.0.0",
-]
-
-[project.scripts]
-zt = "modules.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["modules*"]
-exclude = ["tests*", "scripts*", "corpus*", "docs*"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-addopts = "-v --tb=short"
+exclude = ["scripts*"]
 
 [tool.ruff]
 line-length = 120
@@ -71,9 +56,6 @@ extend-exclude = ["data/", "logs/", "knowledge/"]
 [tool.ruff.lint]
 select = ["F", "E", "W", "UP"]
 ignore = ["E501", "F401", "F403"]
-
-[tool.ruff.lint.per-file-ignores]
-"tests/*" = ["F811"]
 
 [tool.ruff.format]
 quote-style = "double"
