@@ -1,7 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
-#     "tushare>=1.4.0",
 #     "python-dotenv>=1.0.0",
 #     "pandas>=2.0.0",
 #     "requests>=2.28.0",

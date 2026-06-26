@@ -1,12 +1,11 @@
 # 运行时核心依赖（量化分析层，被 scripts/ 下脚本 import）
-# 推荐改用 uv：scripts/ 各脚本 PEP723 已内联声明依赖，uv run 自动安装
-# 本文件仅供不走 uv run 的本地开发参考
-tushare>=1.4.0
+# 推荐改用 uv：项目首次 `uv sync` 一次装齐全部依赖；
+# scripts/ 各脚本 PEP723 已内联声明依赖，uv run 自动准备。
+# 本文件仅供不走 uv 的本地开发参考。
+#
+# 数据源：baostock（K线/基本信息/估值）+ AKShare（资金流），无需 Tushare Token / 中转。
+baostock>=0.9.1
+akshare>=1.18.64
 python-dotenv>=1.0.0
 pandas>=2.0.0
 requests>=2.28.0
-
-# 免费数据源（DATA_MODE=free，无需 Tushare Token）：
-#   uv sync --extra free-data
-# baostock>=0.9.1
-# akshare>=1.18.64

@@ -18,16 +18,14 @@ sys.path.insert(0, str(project_root))
 
 from modules.database import get_connection  # noqa: E402
 from modules.improvement_logger import ImprovementLogger  # noqa: E402
-from modules.tushare_client import TushareClient  # noqa: E402
 from modules.indicators.data_layer import analyze_stock  # noqa: E402
 
 
 class TrackingSyncer:
-    """跟踪数据同步器"""
+    """跟踪数据同步器（K 线 / 指标数据从 daily_kline、indicator_cache 表读取）"""
 
     def __init__(self):
         """初始化同步器"""
-        self.client = TushareClient()
         self.logger = ImprovementLogger()
 
     def sync_daily(self, ts_code: str, days: int = 365) -> dict[str, Any]:

@@ -22,7 +22,7 @@
 ├── SKILL.md                 # Skill 入口：角色协议、调用规则、问诊流程、自我改进协议
 ├── scripts/                 # Claude Code 通过 Bash 调用的 uv-run 脚本
 │   ├── check_mode.py         # 检查 .env / DATA_MODE
-│   ├── setup_mode.py         # 配置 free / jnb / websearch 模式
+│   ├── setup_mode.py         # 配置 free / websearch 模式
 │   ├── sync.py               # 初始化数据库、同步行情和指标
 │   ├── analyze.py            # 个股分析：指标 + 战法 + 诊断 + 评分
 │   ├── screen.py             # 选股扫描
@@ -77,11 +77,8 @@ uv run scripts/check_mode.py
 如果需要手动调试，也可以运行：
 
 ```bash
-# 免费数据源：baostock + AKShare，无需 Tushare Token
+# 免费数据源：baostock + AKShare，开箱即用（默认推荐）
 uv run scripts/setup_mode.py --mode free
-
-# JNB / Tushare 模式：需要 Token，可测试连通性
-uv run scripts/setup_mode.py --mode jnb --token <你的token> --test
 
 # 纯角色对话，不走行情接口
 uv run scripts/setup_mode.py --mode websearch
@@ -162,7 +159,6 @@ Claude 读取建议，向用户提议是否修改 SKILL.md / knowledge
 | 模式 | 说明 | 适合场景 |
 |---|---|---|
 | `free` | 免费数据源（baostock + AKShare），无需 Token | 推荐默认模式 |
-| `jnb` | Tushare / 中转 API，实时性和覆盖更完整 | 有 Tushare Token 的严肃交易分析 |
 | `websearch` | 不走行情接口，只使用角色框架与外部搜索 | 只聊思维框架、职业/人生/商业判断 |
 
 ---

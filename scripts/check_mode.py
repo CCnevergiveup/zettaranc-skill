@@ -11,9 +11,8 @@
     uv run scripts/check_mode.py
 
 输出字段：
-    mode          当前 DATA_MODE（free / jnb / websearch / ""）
-    configured    是否已完成有效配置（mode 非空，且 jnb 模式下 token 有效）
-    token_valid   jnb 模式下 token 是否有效（非占位符）
+    mode          当前 DATA_MODE（free / websearch / ""）
+    configured    是否已完成有效配置（mode 为 free 或 websearch）
     env_exists    .env 文件是否存在
 """
 
@@ -28,9 +27,6 @@ from dotenv import dotenv_values
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = PROJECT_ROOT / ".env"
 
-# Tushare token 占位符特征（.env.example 中的默认值含「你的」）
-TOKEN_PLACEHOLDER_MARK = "你的"
-
 
 def detect_mode() -> dict[str, object]:
     """读取 .env，返回数据模式配置状态。"""
@@ -38,19 +34,13 @@ def detect_mode() -> dict[str, object]:
     values = dotenv_values(ENV_PATH) if env_exists else {}
 
     mode = (values.get("DATA_MODE") or "").strip()
-    token = (values.get("TUSHARE_TOKEN") or "").strip()
 
-    # jnb 模式需要有效 token；free / websearch 模式无需 token
-    token_valid = bool(token) and TOKEN_PLACEHOLDER_MARK not in token
-    if mode == "jnb":
-        configured = token_valid
-    else:
-        configured = mode in ("free", "websearch")
+    # free（免费数据源）/ websearch（纯角色对话）均无需 Token
+    configured = mode in ("free", "websearch")
 
     return {
         "mode": mode,
         "configured": configured,
-        "token_valid": token_valid,
         "env_exists": env_exists,
     }
 

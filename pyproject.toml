@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 authors = [
     {name = "zettaranc-skill contributors"}
 ]
-keywords = ["trading", "quantitative", "tushare", "technical-indicators", "bili"]
+keywords = ["trading", "quantitative", "baostock", "akshare", "technical-indicators", "bili"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Financial and Insurance Industry",
@@ -23,9 +23,11 @@ classifiers = [
     "Topic :: Office/Business :: Financial :: Investment",
 ]
 
-# 运行时核心依赖：数据接入（Tushare）+ 数据处理（pandas）+ 配置（dotenv）
+# 运行时核心依赖：免费数据源（baostock K线/基本信息/估值 + AKShare 资金流）
+# + 数据处理（pandas）+ 配置（dotenv）。首次 `uv sync` 一次装齐，无需额外 extra。
 dependencies = [
-    "tushare>=1.4.0",
+    "baostock>=0.9.1",
+    "akshare>=1.18.64",
     "python-dotenv>=1.0.0",
     "pandas>=2.0.0",
     "requests>=2.28.0",
@@ -35,12 +37,6 @@ dependencies = [
 # 开发工具：lint/format（脚本日常由 uv run 触发，依赖走 PEP723 内联声明）
 dev = [
     "ruff>=0.8.0",
-]
-# 免费数据源（DATA_MODE=free）：baostock 提供 K 线/基本信息/估值，AKShare 提供资金流
-# 脚本 PEP723 已内联声明，此处保留供本地开发 import modules.datasource 使用
-free-data = [
-    "baostock>=0.9.1",
-    "akshare>=1.18.64",
 ]
 
 [tool.setuptools.packages.find]

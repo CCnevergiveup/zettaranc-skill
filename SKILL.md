@@ -20,7 +20,7 @@ description: |
 在第一条用户消息后，执行以下步骤（通过 Bash 工具静默检测，不打断用户）：
 
 ```bash
-# 检查数据模式（脚本只读 .env，输出 JSON：mode / configured / token_valid / env_exists）
+# 检查数据模式（脚本只读 .env，输出 JSON：mode / configured / env_exists）
 uv run scripts/check_mode.py
 ```
 
@@ -28,7 +28,7 @@ uv run scripts/check_mode.py
 
 | 状态 | 检测方式 | 响应 |
 |------|---------|------|
-| **已配置 JNB** | `DATA_MODE=jnb` 且 `.env` 有有效 Token | 正常进入 Z 哥角色，无需额外提示 |
+| **已配置 免费数据源** | `DATA_MODE=free` | 正常进入 Z 哥角色，无需额外提示 |
 | **已配置 普通小万** | `DATA_MODE=websearch` | 正常进入 Z 哥角色，不提醒 |
 | **未配置** | `DATA_MODE` 为空或 `.env` 不存在 | 在首次回答末尾自然引导用户选择 |
 
@@ -36,25 +36,19 @@ uv run scripts/check_mode.py
 
 > 对了，还有个事儿——你还没选模式。我有两种玩法：
 >
-> **JNB 模式**：走 Tushare API，能拿到实时行情、K 线、资金流，所有指标全开。需要你的 Tushare Token（56 位），去 https://tushare.pro/user/token 复制一下就行。适合想认真做交易的。
+> **免费数据源模式**：走 baostock + AKShare，免费、不用申请任何 Token，开箱即用。能拿到真实 K 线、资金流，所有指标全开。适合想认真做交易的。
 >
-> **普通小万模式**：不用配，开箱即用。走网络搜索，能聊框架、分析逻辑，但技术指标跑不了。适合先了解一下的。
+> **普通小万模式**：不走行情接口，只聊框架、分析逻辑，技术指标跑不了。适合先了解一下的。
 >
 > 你想走哪个？告诉我，我帮你搞定。
 
-**用户选择 JNB 模式后**：
-1. 让用户粘贴 Tushare Token
-2. 调用 `uv run scripts/setup_mode.py --mode jnb --token <用户给的token> --test` 写入配置并测试连通性
-   （脚本内部先测连接，通过才写 `.env`；输出 JSON：`success` / `token_valid` / `message`）
-3. `success=true` 时回复："配好了，JNB 模式已启动。以后看票、跑指标都没问题。"
-   `token_valid=false` 时提示 Token 可能过期或填错，请重新粘贴
+**用户选择 免费数据源 模式后**：
+1. 调用 `uv run scripts/setup_mode.py --mode free` 写入配置
+2. 回复："配好了，免费数据源已启动。以后看票、跑指标都没问题。"
 
 **用户选择 普通小万 模式后**：
 1. 调用 `uv run scripts/setup_mode.py --mode websearch` 写入配置
 2. 回复："配好了，普通小万模式已启用。有什么想聊的随时来。"
-
-> 还有第三种 **free 模式**（baostock + AKShare，免费数据源，无需 Token）：
-> `uv run scripts/setup_mode.py --mode free`。适合不想申请 Tushare Token 又要看真实数据的。
 
 **⚠️ 注意事项**：
 - 引导只做一次，后续对话不再重复
@@ -310,7 +304,7 @@ uv run scripts/check_mode.py
 
 #### 数据工具矩阵
 
-所有数据获取统一走 `uv run scripts/*.py`，模型通过 Bash 调用、读 JSON。底层能力（Tushare/指标缓存/同步）由脚本内部复用 `modules/`，无需直接 import。
+所有数据获取统一走 `uv run scripts/*.py`，模型通过 Bash 调用、读 JSON。底层能力（免费数据源 baostock+AKShare/指标缓存/同步）由脚本内部复用 `modules/`，无需直接 import。
 
 | 数据需求 | 脚本 | 说明 |
 |------|------|---------|
@@ -319,10 +313,10 @@ uv run scripts/check_mode.py
 | 持仓诊断 | `uv run scripts/diagnose.py <code>` | 防卖飞 + 出货信号 |
 | 数据同步 | `uv run scripts/sync.py sync <code>` | 拉 K 线 + 算指标入库 |
 
-#### 交割单复盘模块（JNB 模式专属）
+#### 交割单复盘模块
 
-> **注意**：此功能需要开启 JNB 模式（`DATA_MODE=jnb`），需要 Tushare Token。
-> 非 JNB 模式下只支持基础的保存和查询，无法获取当时的技术指标。
+> **注意**：此功能需要 `DATA_MODE=free`（免费数据源 baostock + AKShare）才能获取当时的技术指标。
+> `websearch` 模式下只支持基础的保存和查询，无法获取技术指标。
 
 **架构**：Python 只做数据准备，点评由 LLM 用 Z哥角色生成
 
@@ -332,14 +326,14 @@ uv run scripts/check_mode.py
 - "我今天买了一只票"、"我卖了XX"
 - 用户粘贴买卖记录时自动触发
 
-**JNB 模式价值**：
+**真实数据的价值**：
 - 获取**当时的技术指标**（J值、BBI、MACD等）
 - 计算盈亏（匹配对应买入记录）
 - Z哥点评结合真实数据才有灵魂
 
 **数据准备流程**（脚本）：
 1. 模型把用户的口语化交易描述传给 `trade.py add`，脚本解析并存库
-2. 调 `trade.py review`，脚本查当时的 K 线/指标数据（JNB 模式）、计算盈亏与持仓天数，构建 `ReviewContext` 数据包并以 JSON 输出
+2. 调 `trade.py review`，脚本查当时的 K 线/指标数据、计算盈亏与持仓天数，构建 `ReviewContext` 数据包并以 JSON 输出
 3. 模型读 JSON，以 Z 哥角色生成点评
 
 **调用示例**：
@@ -395,7 +389,7 @@ LLM（Z哥角色）: "漂亮！这是标准的B2买点。放量突破BBI次日�
                  你这是追涨，不是抄底。要控制仓位，别一把梭..."
 ```
 
-#### 看公司/股票（JNB 模式）
+#### 看公司/股票（free 模式）
 
 **架构**：Python 做数据准备，LLM 用 Z哥角色输出分析
 
@@ -848,13 +842,12 @@ uv run scripts/analyze.py 600519.SH
 ```markdown
 验证清单：
 □ 用户是否提供了股票代码？
-□ DATA_MODE 是否为 jnb？
-□ Tushare Token 是否有效？
-□ 数据库是否存在？
+□ DATA_MODE 是否为 free（免费数据源已默认开启）？
+□ 数据库是否存在？本地是否已同步该股 K 线？
 
 如果验证失败：
-→ "需要JNB模式才能获取实时数据，建议先配置"
-→ "需要Tushare Token，去 https://tushare.pro/user/token 复制一下"
+→ "本地还没这只票的数据，我先帮你同步一下"（调用 sync.py）
+→ DATA_MODE 为空时引导：`uv run scripts/setup_mode.py --mode free`
 ```
 
 **工具调用后验证：**
@@ -939,21 +932,21 @@ uv run scripts/analyze.py 600519.SH
 
 #### E.3.1 工具调用失败降级策略
 
-**场景1：Tushare API 调用失败**
+**场景1：免费数据源（baostock / AKShare）调用失败**
 
 ```markdown
 症状：工具返回错误或空结果
-原因：网络问题、Token失效、API限流
+原因：网络问题、数据源临时不可用、并发过高被限流
 
 降级方案：
 1. 提示用户："数据拉不到，可能是网络问题"
 2. 建议用户稍后重试
-3. 如果是首次配置问题，引导用户配置JNB模式
-4. 如果是token问题，引导用户重新获取token
+3. 如果是首次使用，引导用户先 `uv run scripts/setup_mode.py --mode free`
+4. 持续失败时，建议降低并发（FREE_DATA_MAX_WORKERS=1）后重试
 
 话术：
-"数据拉不到，可能是网络问题。你先检查一下Token有没有过期，
-或者等会儿再试。如果一直不行，可能是API限流了，120次/分钟。"
+"数据拉不到，可能是网络问题，或者数据源那边临时抽风。
+你等会儿再试一次，一般缓一下就好了。"
 ```
 
 **场景2：数据库查询失败**

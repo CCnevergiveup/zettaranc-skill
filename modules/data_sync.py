@@ -1,23 +1,15 @@
 """
 数据同步模块
-从 Tushare API 获取数据并存储到 SQLite
+从免费数据源（baostock + AKShare）获取数据并存储到 SQLite
 支持增量更新和全量更新
 """
 
 import os
-import time
 import logging
 import threading
-import collections
-import multiprocessing
 import concurrent.futures
 from datetime import datetime, timedelta
 from typing import Any, Optional
-
-try:
-    import tushare as ts
-except ImportError:
-    print("请先安装依赖: pip install tushare")
 
 # dotenv 加载已移至 modules/__init__.py（包级别一次性加载，override=True）
 
@@ -30,117 +22,20 @@ _MAX_SYNC_WORKERS = 5
 
 # 涨跌停阈值（主板 10%，此处用 9.9% 容差）
 # 注意：创业板(300xxx)/科创板(688xxx) 实际为 20%，ST 为 5%，
-# 新股前 5 日无限制。当前简化处理，v2.11.0 计划按 market 字段动态调整。
+# 新股前 5 日无限制。当前简化处理。
 _LIMIT_THRESHOLD = 9.9
-
-# 中转 API 配置（从环境变量读取）
-TUSHARE_API_URL = os.environ.get("TUSHARE_API_URL", "")
-VERIFY_TOKEN_URL = os.environ.get("TUSHARE_VERIFY_TOKEN_URL", "")
-
-
-# ==================== 模块级限流器（v2.10.0 P1-4） ====================
-# 多进程安全：同机多进程共享同一把 multiprocessing.Lock
-# 限流仅同机多进程有效，跨机器需 Redis 协调（详见 plan P1-4 风险）
-class _RateLimiter:
-    """Tushare 限流器（多进程安全 + 滑动窗口 token bucket）
-
-    设计：
-    - 60s 滑动窗口内的请求计数（in-memory deque）
-    - multiprocessing.Lock 序列化 critical section
-    - TUSHARE_RPM env var 控制 max requests/min（默认 180，留 20 缓冲应对 200 上限）
-
-    用法：
-        _GLOBAL_LIMITER.wait()  # 阻塞直到安全可调
-    """
-
-    def __init__(self, max_per_min: int = 180):
-        self._max = max_per_min
-        self._window: collections.deque = collections.deque()
-        # 关键：multiprocessing.Lock 不是进程间共享的默认锁
-        # 在父进程创建，子进程 fork 后会继承一份
-        self._lock = multiprocessing.Lock()
-
-    def wait(self) -> None:
-        """阻塞直到 60s 窗口内有空位"""
-        with self._lock:
-            now = time.monotonic()
-            # 弹出 60s 外的旧时间戳
-            while self._window and (now - self._window[0]) > 60:
-                self._window.popleft()
-            if len(self._window) >= self._max:
-                # 等待最老一项出窗口
-                sleep_for = 60 - (now - self._window[0]) + 0.05  # +0.05s 缓冲
-                logger.debug(f"限流：等 {sleep_for:.2f}s（窗口已满 {self._max} req）")
-                time.sleep(sleep_for)
-                # 重新弹出（防止极端情况）
-                now = time.monotonic()
-                while self._window and (now - self._window[0]) > 60:
-                    self._window.popleft()
-            self._window.append(time.monotonic())
-
-    @property
-    def current_count(self) -> int:
-        """当前窗口内请求数（只读，调试用）"""
-        with self._lock:
-            now = time.monotonic()
-            while self._window and (now - self._window[0]) > 60:
-                self._window.popleft()
-            return len(self._window)
-
-
-# 模块级单例（v2.10.0 P1-4 替代原 instance-level _rate_limit_lock）
-_GLOBAL_LIMITER = _RateLimiter(max_per_min=int(os.environ.get("TUSHARE_RPM", "180")))
-
-
-def _rate_limit_global() -> None:
-    """模块级公开限流入口（v2.10.0 P1-4 新增，替代 instance-level _rate_limit）"""
-    _GLOBAL_LIMITER.wait()
 
 
 class DataSyncer:
-    """数据同步器"""
+    """数据同步器（免费数据源：baostock + AKShare）"""
 
-    def __init__(self, token: str | None = None):
-        self.token = token or os.environ.get("TUSHARE_TOKEN")
-        self.data_mode = os.getenv("DATA_MODE", "websearch")
+    def __init__(self) -> None:
+        self.data_mode = os.getenv("DATA_MODE", "free")
 
-        # 向后兼容：保留 instance-level attrs（外部可能引用）
-        # 但实际限流走模块级 _GLOBAL_LIMITER
-        self.last_request_time: dict[str, float] = {}
-        self.min_interval = 60.0 / 120
+        # 免费数据源：baostock(K线/基本信息/估值) + AKShare(资金流)，无需 Token/中转
+        from .datasource import create_free_provider
 
-        # ==================== 免费数据源模式 ====================
-        # baostock(K线/基本信息/估值) + AKShare(资金流)，无需 Tushare Token/中转
-        if self.data_mode == "free":
-            from .datasource import create_free_provider
-
-            self.provider = create_free_provider()
-            self.pro = None
-            return
-
-        # ==================== Tushare / JNB 模式 ====================
-        self.provider = None
-        # 仅在 JNB 模式下强制检查 Tushare 配置
-        if self.data_mode == "jnb":
-            if not self.token:
-                raise ValueError("JNB 模式下未设置 TUSHARE_TOKEN，请检查 .env 文件。")
-            if not TUSHARE_API_URL:
-                raise ValueError(
-                    "JNB 模式下未设置 TUSHARE_API_URL，请在 .env 中配置中转 API 地址。\n"
-                    "示例：TUSHARE_API_URL=https://tt.xiaodefa.cn"
-                )
-
-        # 初始化 Tushare
-        ts.set_token(self.token)
-        self.pro = ts.pro_api()
-        self.pro._DataApi__http_url = TUSHARE_API_URL
-
-    def _rate_limit(self, api_name: str):
-        """线程安全的限流控制（v2.10.0 P1-4 改为调模块级 _GLOBAL_LIMITER）"""
-        # v2.10.0：原 per-instance lock 改用模块级 multiprocessing 安全限流器
-        _rate_limit_global()
-        # 保留旧字段更新，便于外部观察（不影响实际限流）
-        self.last_request_time[api_name] = time.time()
+        self.provider = create_free_provider()
 
     def _log_sync(self, data_type: str, ts_code: str | None, last_date: str, status: str, message: str = ""):
         """记录同步日志"""
@@ -188,13 +83,7 @@ class DataSyncer:
         """
         logger.info("开始同步股票基本信息...")
         try:
-            if self.provider is not None:
-                df = self.provider.stock_basic()
-            else:
-                self._rate_limit("stock_basic")
-                df = self.pro.stock_basic(
-                    exchange="", list_status="L", fields="ts_code,name,area,industry,market,list_date,is_hs"
-                )
+            df = self.provider.stock_basic()
 
             if df is None or len(df) == 0:
                 logger.warning("获取股票基本信息失败")
@@ -251,18 +140,8 @@ class DataSyncer:
             end_date = datetime.now().strftime("%Y%m%d")
 
         try:
-            if self.provider is not None:
-                # 免费模式：baostock 前复权日线（adjustflag=2，与 qfq 对齐）
-                df = self.provider.daily_kline(ts_code, start_date, end_date)
-            else:
-                self._rate_limit("daily_kline")
-                df = ts.pro_bar(
-                    ts_code=ts_code,
-                    start_date=start_date,
-                    end_date=end_date,
-                    adj="qfq",
-                    api=self.pro,
-                )
+            # 免费模式：baostock 前复权日线（adjustflag=2，与 qfq 对齐）
+            df = self.provider.daily_kline(ts_code, start_date, end_date)
 
             if df is None or len(df) == 0:
                 return 0
@@ -425,10 +304,8 @@ class DataSyncer:
         return results
 
     def _sync_workers(self) -> int:
-        """并发线程数：免费模式受 provider.max_workers 约束（baostock/AKShare 不宜高并发）。"""
-        if self.provider is not None:
-            return max(1, min(_MAX_SYNC_WORKERS, getattr(self.provider, "max_workers", 1)))
-        return _MAX_SYNC_WORKERS
+        """并发线程数：受 provider.max_workers 约束（baostock/AKShare 不宜高并发）。"""
+        return max(1, min(_MAX_SYNC_WORKERS, getattr(self.provider, "max_workers", 1)))
 
     # ==================== 指标缓存 ====================
 
@@ -720,133 +597,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
             ts_codes_for_indic = [c for c, n in kline_results.items() if n > 0]
         return self.sync_all_indicators(ts_codes=ts_codes_for_indic or None)
 
-    # ==================== Tushare 官方指标（用于 diff 验证） ====================
-
-    def sync_stk_factor(self, ts_code: str, start_date: str | None = None, end_date: str | None = None) -> int:
-        """
-        同步单只股票的 Tushare 官方技术指标（stk_factor 接口）
-
-        Args:
-            ts_code: 股票代码
-            start_date: 开始日期 YYYYMMDD
-            end_date: 结束日期 YYYYMMDD
-
-        Returns:
-            更新条数
-        """
-        try:
-            if start_date is None:
-                start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
-            if end_date is None:
-                end_date = datetime.now().strftime("%Y%m%d")
-
-            self._rate_limit("stk_factor")
-            df = self.pro.stk_factor(ts_code=ts_code, start_date=start_date, end_date=end_date)
-
-            if df is None or len(df) == 0:
-                return 0
-
-            # 字段映射：Tushare 字段名 -> 数据库字段名
-            field_map = {
-                "ts_code": "ts_code",
-                "trade_date": "trade_date",
-                "close": "close",
-                "macd_dif": "macd_dif",
-                "macd_dea": "macd_dea",
-                "macd": "macd",
-                "kdj_k": "kdj_k",
-                "kdj_d": "kdj_d",
-                "kdj_j": "kdj_j",
-                "rsi_6": "rsi_6",
-                "rsi_12": "rsi_12",
-                "rsi_24": "rsi_24",
-                "boll_upper": "boll_upper",
-                "boll_mid": "boll_mid",
-                "boll_lower": "boll_lower",
-                "cci": "cci",
-            }
-
-            with get_connection() as conn:
-                cursor = conn.cursor()
-                records = []
-                for row in df.itertuples(index=False):
-                    row_dict = row._asdict()
-                    values = [row_dict.get(field_map.get(k, k), 0) for k in field_map.keys()]
-                    records.append(values)
-
-                cursor.executemany(
-                    """
-                    INSERT OR REPLACE INTO tushare_indicator_cache
-                    (ts_code, trade_date, close, macd_dif, macd_dea, macd,
-                     kdj_k, kdj_d, kdj_j, rsi_6, rsi_12, rsi_24,
-                     boll_upper, boll_mid, boll_lower, cci)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                    records,
-                )
-
-            latest_date = df["trade_date"].max()
-            self._log_sync("stk_factor", ts_code, latest_date, "success")
-            logger.info(f"Tushare 指标同步完成: {ts_code}, {len(df)} 条")
-            return len(df)
-
-        except Exception as e:
-            logger.error(f"Tushare 指标同步失败 {ts_code}: {e}")
-            self._log_sync("stk_factor", ts_code, "", "failed", str(e))
-            return 0
-
-    def sync_all_stk_factor(self, ts_codes: list[str] | None = None, days: int = 365) -> dict[str, int]:
-        """
-        批量同步多只股票的 Tushare 官方指标（并发执行）
-
-        Args:
-            ts_codes: 股票代码列表，None 表示同步所有股票
-            days: 同步天数
-
-        Returns:
-            每只股票的更新条数
-        """
-        results = {}
-
-        if ts_codes is None:
-            with get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT ts_code FROM stock_basic")
-                ts_codes = [row["ts_code"] for row in cursor.fetchall()]
-
-        logger.info(f"开始批量同步 Tushare 指标，共 {len(ts_codes)} 只股票...")
-
-        start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-        end_date = datetime.now().strftime("%Y%m%d")
-
-        progress_lock = threading.Lock()
-        completed = 0
-        total = len(ts_codes)
-
-        def sync_single(ts_code):
-            nonlocal completed
-            try:
-                count = self.sync_stk_factor(ts_code, start_date, end_date)
-                with progress_lock:
-                    completed += 1
-                    if completed % 10 == 0:
-                        logger.info(f"进度: {completed}/{total}")
-                return ts_code, count
-            except Exception as e:
-                logger.error(f"Tushare 指标同步失败 {ts_code}: {e}")
-                with progress_lock:
-                    completed += 1
-                return ts_code, 0
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=_MAX_SYNC_WORKERS) as executor:
-            futures = [executor.submit(sync_single, code) for code in ts_codes]
-            for future in concurrent.futures.as_completed(futures):
-                code, count = future.result()
-                results[code] = count
-
-        logger.info(f"批量 Tushare 指标同步完成，成功 {sum(1 for v in results.values() if v > 0)}/{len(ts_codes)}")
-        return results
-
     # ==================== 每日估值指标 (PE/PB/PS) ====================
 
     def ensure_daily_basic_columns(self):
@@ -873,7 +623,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
         """
         同步单只股票的每日估值指标（PE/PB/PS/市值等）
 
-        使用 Tushare daily_basic 接口，数据写入 daily_kline 表对应列。
+        免费模式：baostock 估值（peTTM/pbMRQ/psTTM），数据写入 daily_kline 表对应列。
 
         Args:
             ts_code: 股票代码
@@ -891,16 +641,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
             if not end_date:
                 end_date = datetime.now().strftime("%Y%m%d")
 
-            if self.provider is not None:
-                # 免费模式：baostock 估值（peTTM/pbMRQ/psTTM），best-effort，缺失不阻断
-                df = self.provider.daily_basic(ts_code, start_date, end_date)
-            else:
-                self._rate_limit("daily_basic")
-                df = self.pro.daily_basic(
-                    ts_code=ts_code,
-                    start_date=start_date,
-                    end_date=end_date,
-                )
+            # baostock 估值（peTTM/pbMRQ/psTTM），best-effort，缺失不阻断
+            df = self.provider.daily_basic(ts_code, start_date, end_date)
 
             if df is None or len(df) == 0:
                 return 0
@@ -996,8 +738,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
         """
         同步单只股票的单日资金流向
 
-        免费模式（provider）：AKShare 一次返回最近约 120 日，内部按 trade_date 过滤入库。
-        Tushare 模式：调用单日 moneyflow 接口。
+        AKShare 一次返回最近约 120 日，内部按 trade_date 过滤入库。
 
         Args:
             ts_code: 股票代码
@@ -1006,27 +747,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
         Returns:
             更新条数
         """
-        if self.provider is not None:
-            # 免费模式：拉历史后筛选指定单日
-            return self.sync_moneyflow_history(ts_code, start_date=trade_date, end_date=trade_date)
-
-        try:
-            self._rate_limit("moneyflow")
-            df = self.pro.moneyflow(ts_code=ts_code, trade_date=trade_date)
-
-            if df is None or len(df) == 0:
-                return 0
-
-            records = [self._tushare_moneyflow_record(row._asdict()) for row in df.itertuples(index=False)]
-            self._write_moneyflow_records(records)
-
-            self._log_sync("moneyflow", ts_code, trade_date, "success")
-            return len(records)
-
-        except Exception as e:
-            logger.error(f"资金流向同步失败 {ts_code} {trade_date}: {e}")
-            self._log_sync("moneyflow", ts_code, "", "failed", str(e))
-            return 0
+        # 免费模式：拉历史后筛选指定单日
+        return self.sync_moneyflow_history(ts_code, start_date=trade_date, end_date=trade_date)
 
     def sync_moneyflow_history(
         self, ts_code: str, days: int = 120, start_date: str | None = None, end_date: str | None = None
@@ -1049,18 +771,13 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
             end_date = datetime.now().strftime("%Y%m%d")
 
         try:
-            if self.provider is not None:
-                df = self.provider.moneyflow(ts_code, start_date, end_date)
-            else:
-                # Tushare 模式：按股票代码 + 日期区间拉取
-                self._rate_limit("moneyflow")
-                df = self.pro.moneyflow(ts_code=ts_code, start_date=start_date, end_date=end_date)
+            df = self.provider.moneyflow(ts_code, start_date, end_date)
 
             if df is None or len(df) == 0:
                 logger.warning(f"资金流向无数据: {ts_code} {start_date}-{end_date}")
                 return 0
 
-            records = [self._tushare_moneyflow_record(row._asdict()) for row in df.itertuples(index=False)]
+            records = [self._moneyflow_record(row._asdict()) for row in df.itertuples(index=False)]
             self._write_moneyflow_records(records)
 
             latest_date = max((r[1] for r in records), default=end_date)
@@ -1074,8 +791,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
             return 0
 
     @staticmethod
-    def _tushare_moneyflow_record(row_dict: dict) -> tuple:
-        """统一 moneyflow 行 -> 入库元组（兼容 Tushare 与 provider 字段）。"""
+    def _moneyflow_record(row_dict: dict) -> tuple:
+        """统一 moneyflow 行 -> 入库元组（provider 字段）。"""
         return (
             row_dict["ts_code"],
             row_dict["trade_date"],
@@ -1134,7 +851,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
             """)
             sync_status = [dict(row) for row in cursor.fetchall()]
 
-            provider_name = self.provider.name if self.provider is not None else "tushare"
+            provider_name = self.provider.name
 
             return {
                 "data_mode": self.data_mode,
@@ -1153,14 +870,11 @@ def main():
     """命令行入口"""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Tushare 数据同步工具")
+    parser = argparse.ArgumentParser(description="免费数据源（baostock + AKShare）同步工具")
     parser.add_argument(
         "action",
-        choices=["init", "sync", "status", "stk-factor", "moneyflow"],
-        help=(
-            "操作: init=初始化数据库, sync=同步数据, status=查看状态, "
-            "stk-factor=同步Tushare官方指标, moneyflow=同步资金流（免费模式走 AKShare）"
-        ),
+        choices=["init", "sync", "status", "moneyflow"],
+        help="操作: init=初始化数据库, sync=同步数据, status=查看状态, moneyflow=同步资金流（AKShare）",
     )
     parser.add_argument("--ts_code", help="股票代码，如 000001.SZ")
     parser.add_argument("--days", type=int, default=730, help="同步天数")
@@ -1187,10 +901,9 @@ def main():
         if args.ts_code:
             # 同步单只股票
             syncer.sync_daily_kline(args.ts_code)
-            # 免费模式顺带同步资金流（AKShare，失败不阻断）
-            if syncer.provider is not None:
-                print(f"正在同步资金流: {args.ts_code} ...")
-                syncer.sync_moneyflow_history(args.ts_code, days=args.days)
+            # 顺带同步资金流（AKShare，失败不阻断）
+            print(f"正在同步资金流: {args.ts_code} ...")
+            syncer.sync_moneyflow_history(args.ts_code, days=args.days)
             # 单只股票默认同步指标缓存（除非显式跳过）
             if not args.skip_indicators:
                 print(f"正在同步指标缓存: {args.ts_code} ...")
@@ -1206,21 +919,6 @@ def main():
 
         print("同步完成")
         print(syncer.get_sync_status())
-
-    elif args.action == "stk-factor":
-        syncer = DataSyncer()
-
-        if args.ts_code:
-            print(f"正在同步 Tushare 官方指标: {args.ts_code} ...")
-            start_date = (datetime.now() - timedelta(days=args.days)).strftime("%Y%m%d")
-            end_date = datetime.now().strftime("%Y%m%d")
-            count = syncer.sync_stk_factor(args.ts_code, start_date=start_date, end_date=end_date)
-            print(f"同步完成，{count} 条")
-        else:
-            print("正在批量同步 Tushare 官方指标...")
-            results = syncer.sync_all_stk_factor(days=args.days)
-            success = sum(1 for v in results.values() if v > 0)
-            print(f"批量同步完成，成功 {success}/{len(results)}")
 
     elif args.action == "moneyflow":
         syncer = DataSyncer()

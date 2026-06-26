@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目定位
 
-zettaranc-skill 是 **AI Skill（思维框架蒸馏包）+ 真实数据量化工具**的混合系统。将 zettaranc（万千）的投资思维框架封装为 AI 可加载的 `SKILL.md`，同时提供基于 Tushare 行情数据的 Python 量化分析层（60+ 指标、30+ 战法、选股/回测/诊断）。
+zettaranc-skill 是 **AI Skill（思维框架蒸馏包）+ 真实数据量化工具**的混合系统。将 zettaranc（万千）的投资思维框架封装为 AI 可加载的 `SKILL.md`，同时提供基于免费数据源（baostock + AKShare）的 Python 量化分析层（60+ 指标、30+ 战法、选股/回测/诊断）。
 
 **核心设计原则**：Python 层只做数据准备，所有点评/分析话术由 LLM 用 Z 哥角色生成。
 
@@ -13,9 +13,8 @@ zettaranc-skill 是 **AI Skill（思维框架蒸馏包）+ 真实数据量化工
 ### 安装与配置
 
 ```bash
-pip install -r requirements.txt   # 安装依赖
-pip install -e .                  # 开发模式安装，注册 zt 命令
-cp .env.example .env              # 配置 Tushare Token 和 API URL
+uv sync                           # 一次装齐全部运行依赖（baostock + AKShare + pandas 等）
+cp .env.example .env              # 默认 DATA_MODE=free，无需 Token，开箱即用
 ```
 
 ### 测试
@@ -68,19 +67,17 @@ python corpus/quality_check.py SKILL.md --strict  # 严格模式
 
 | 模式 | 环境变量 | 说明 |
 |------|---------|------|
-| JNB 模式 | `DATA_MODE=jnb` | 接入 Tushare 真实行情，实时数据查询 + 指标计算 + 战法识别 |
+| free 模式 | `DATA_MODE=free` | 接入免费数据源（baostock K线/基本信息/估值 + AKShare 资金流），实时数据查询 + 指标计算 + 战法识别。默认模式，无需 Token |
 | 普通小万 | `DATA_MODE=websearch` | 纯 LLM 对话，不走外部数据接口 |
 
 ### 数据流
 
 ```
-Tushare API → data_sync → SQLite → indicators/ → strategies/ → backtest/
-                                                       ↓
-                                             SKILL.md (LLM 角色层)
+baostock + AKShare → datasource → data_sync → SQLite → indicators/ → strategies/ → backtest/
+                                                              ↓
+                                                    SKILL.md (LLM 角色层)
 
 用户输入 → 意图识别(intent_router) → 规则匹配 → 角色框架(SKILL.md / career / life)
-                                              → 知识库检索(Qdrant RAG, 可选)
-                                              → LLM 生成(MiniMax / OpenAI 兼容, 可选)
 ```
 
 ### 核心模块
@@ -102,12 +99,12 @@ Tushare API → data_sync → SQLite → indicators/ → strategies/ → backtes
 ## 重要约定
 
 1. **数据库路径**：统一从 `DB_PATH` 环境变量读取，代码中不硬编码
-2. **Tushare URL**：统一从 `TUSHARE_API_URL` 环境变量读取，代码中不硬编码
+2. **数据源选择**：统一从 `DATA_MODE` / `FREE_DATA_PROVIDER` 环境变量读取，由 `modules/datasource/factory.py` 创建 provider
 3. **环境变量加载**：`modules/__init__.py` 在包首次 import 时一次性加载 `.env`，各子模块不重复加载
 4. **模块间 DB 路径解析**：`modules/*.py` 用 `Path(__file__).parent.parent`；`modules/indicators/*.py` 用 `Path(__file__).parent.parent.parent`
-5. **限流控制**：所有 Tushare API 调用必须带 `_rate_limit()`，控制 120 次/分钟
+5. **并发控制**：免费源同步受 `provider.max_workers` 约束（baostock/AKShare 不宜高并发，默认串行）
 6. **事务管理**：数据库操作统一用 `get_connection()` 上下文管理器
-7. **真实数据优先**：不使用 mock 数据，测试基于真实 Tushare 数据管线
+7. **真实数据优先**：不使用 mock 数据，基于真实免费数据管线（baostock + AKShare）
 8. **最小改动原则**：修改 `SKILL.md` 需语料支撑，不能凭印象
 9. **Python 层只做数据准备**：点评话术由 LLM 用 Z 哥角色生成，避免"AI味"
 

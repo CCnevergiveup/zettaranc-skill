@@ -19,11 +19,11 @@ if not _db_path.is_absolute():
 DB_PATH = str(_db_path.resolve())
 
 # 数据模式
-DATA_MODE = os.getenv("DATA_MODE", "websearch")
+DATA_MODE = os.getenv("DATA_MODE", "free")
 
 
 def get_data_mode() -> str:
-    """获取当前数据模式：jnb 或 websearch"""
+    """获取当前数据模式：free 或 websearch"""
     return DATA_MODE
 
 
